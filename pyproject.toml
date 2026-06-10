@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "silent-sentry"
 version = "0.2.0"
-description = "Advanced Enterprise-Grade Static AST-based Security Auditor"
+description = "Advanced Static AST-based Security Auditor for Python"
 readme = "README.md"
 requires-python = ">=3.7"
 authors = [
@@ -13,17 +13,14 @@ authors = [
 ]
 dependencies = [
     "rich",
-    "requests"
+    "requests",
+    "pyyaml"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
     "Topic :: Security",
 ]
 
 [project.scripts]
-silent-sentry = "cli:main"
-
-[tool.setuptools.packages.find]
-where = ["."]
+silent-sentry = "cli.main"

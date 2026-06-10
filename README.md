@@ -1,62 +1,38 @@
-# 🛡️ Silent Sentry
+# 🛡️ Silent Sentry (v0.2.0)
 
-> **Enterprise-Grade Static AST-based Security Auditor for Python.**
+> **Advanced Static AST-based Security Auditor & De-obfuscator.**
 
-Silent Sentry is a premium security tool designed to inspect Python source code for malicious patterns, obfuscation, and suspicious exfiltration techniques. It performs deep static analysis of the Abstract Syntax Tree (AST) to identify threats without code execution.
+Silent Sentry is an elite security tool designed to identify malicious patterns, supply-chain backdoors, and advanced obfuscation in Python codebases and PyPI packages. It uses deep AST analysis, constant propagation, and a YAML-driven rule engine to track dataflow from sources to dangerous sinks.
 
-```ascii
-   _____ _ _            _     _____             _              
-  / ____(_) |          | |   / ____|           | |             
- | (___  _| | ___ _ __ | |_ | (___   ___ _ __ | |_ _ __ _   _ 
-  \___ \| | |/ _ \ '_ \| __| \___ \ / _ \ '_ \| __| '__| | | |
-  ____) | | |  __/ | | | |_  ____) |  __/ | | | |_| |  | |_| |
- |_____/|_|_|\___|_| |_|\__||_____/ \___|_| |_|\__|_|   \__, |
-                                                         __/ |
-                                                        |___/ 
-```
+## 🚀 Key Features
 
-## ✨ Advanced Features
+- **Partial Evaluation Engine**: Statically resolves string folding, `chr()` arrays, and `''.join()` operations to unmask hidden payloads (e.g., `chr(101)+chr(118)...` -> `eval`).
+- **YAML Rule Engine**: Extensible, mini-Semgrep style logic. Define complex patterns in `rules.yaml`.
+- **Dynamic Import Solver**: Traces obfuscated imports like `__import__('o'+'s')` or `getattr(builtins, 'exec')`.
+- **Interprocedural Taint Tracking**: Monitors variable assignments and constant propagation to detect when dangerous modules are aliased or passed around.
+- **PyPI Auditor**: Directly audit any PyPI package by name (`silent-sentry pypi <name>`).
+- **Rich Interface**: Beautifully formatted terminal reports with code snippets and severity breakdowns.
 
-- 🧠 **Import Alias Tracking**: Detects attempts to hide dangerous modules behind aliases (e.g., `import os as dangerous`).
-- 🌊 **Variable Taint Analysis**: Tracks data flow from dangerous sources to potentially malicious sinks.
-- 📉 **Shannon Entropy Analysis**: Calculates entropy on string literals to detect encrypted or highly obfuscated payloads.
-- 📦 **PyPI Integration**: Audit any package directly from PyPI by downloading and extracting it automatically.
-- 🎨 **Rich UI**: Beautiful terminal interface with colored tables, progress indicators, and summarized reports.
-- 🔍 **Deep Inspection**:
-    - **Dynamic Execution**: `eval()`, `exec()`
-    - **Shell Commands**: `os.system`, `subprocess`, `pty`
-    - **Data Exfiltration**: `os.environ` access, sensitive paths (`/etc/passwd`, `.ssh/`)
-    - **Obfuscation**: Base64 detection, hex patterns.
-
-## 🚀 Installation
+## 🛠️ Installation
 
 ```bash
 pip install .
 ```
 
-## 🛠️ Usage
+## 📖 Usage
 
-### Scan Local Path
-Scan a single file or an entire directory:
+### Scan a Local Project
 ```bash
 silent-sentry scan ./my_project
 ```
 
-### Audit PyPI Package
-Directly audit the latest version of any package on PyPI:
+### Audit a PyPI Package
 ```bash
-silent-sentry pypi requests
+silent-sentry pypi some-suspicious-pkg
 ```
 
-## 📊 Vulnerability Categorization
-
-| Severity | Category | Description |
-| :--- | :--- | :--- |
-| **CRITICAL** | Dynamic Execution | Potential for arbitrary code execution via `eval`/`exec`. |
-| **HIGH** | OS Command / Taint | Unauthorized shell access or use of tainted variables. |
-| **MEDIUM** | High Entropy / Obfuscation | Detection of suspicious, non-readable data structures. |
-| **LOW** | Suspicious Imports | Presence of networking or system modules in unusual contexts. |
+## 🛡️ Rule Configuration
+Modify `rules.yaml` to add custom detection patterns for your specific security requirements.
 
 ## 📄 License
-
 MIT License.

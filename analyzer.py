@@ -1,161 +1,186 @@
 import ast
-import re
-import os
 import math
-from collections import Counter
+import yaml
+import os
+from collections import deque
 
-def calculate_entropy(data):
-    if not data:
-        return 0
-    entropy = 0
-    for count in Counter(data).values():
-        p = count / len(data)
-        entropy -= p * math.log2(p)
-    return entropy
-
-class SilentSentryAnalyzer(ast.NodeVisitor):
-    def __init__(self, filename, source_code):
-        self.filename = filename
-        self.source_code = source_code.splitlines()
-        self.findings = []
-        self.suspicious_imports = {'socket', 'urllib', 'requests', 'aiohttp', 'subprocess', 'os', 'sh', 'pty', 'codecs'}
+class StaticResolver:
+    """
+    Partial Evaluator / De-obfuscation Engine.
+    Statically resolves string operations, chr() calls, and joins.
+    """
+    @staticmethod
+    def resolve(node, scope_vars):
+        if isinstance(node, ast.Constant):
+            return node.value
         
-        # Tracking for alias detection
-        self.import_aliases = {} # alias -> real_module
+        # Resolve chr(x) + chr(y)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left = StaticResolver.resolve(node.left, scope_vars)
+            right = StaticResolver.resolve(node.right, scope_vars)
+            if isinstance(left, str) and isinstance(right, str):
+                return left + right
         
-        # Tracking for basic taint analysis
-        # For simplicity in this static context, we track variable assignments from known dangerous sources
-        self.tainted_vars = {} # var_name -> source_type
-
-    def add_finding(self, node, severity, category, message):
-        snippet = ""
-        try:
-            snippet = self.source_code[node.lineno - 1].strip()
-        except IndexError:
-            pass
+        # Resolve chr(int)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'chr':
+            if len(node.args) == 1:
+                val = StaticResolver.resolve(node.args[0], scope_vars)
+                if isinstance(val, int):
+                    try:
+                        return chr(val)
+                    except:
+                        pass
+        
+        # Resolve ''.join([...])
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == 'join':
+            sep = StaticResolver.resolve(node.func.value, scope_vars)
+            if isinstance(sep, str) and len(node.args) == 1 and isinstance(node.args[0], ast.List):
+                parts = [StaticResolver.resolve(elt, scope_vars) for elt in node.args[0].elts]
+                if all(isinstance(p, str) for p in parts):
+                    return sep.join(parts)
+        
+        # Resolve local variable references (Constant Propagation)
+        if isinstance(node, ast.Name) and node.id in scope_vars:
+            return scope_vars[node.id]
             
-        self.findings.append({
-            'file': self.filename,
-            'line': node.lineno,
-            'severity': severity,
-            'category': category,
-            'message': message,
-            'snippet': snippet
-        })
+        return None
 
-    def get_real_module(self, name):
-        return self.import_aliases.get(name, name)
+class SilentSentryCore(ast.NodeVisitor):
+    def __init__(self, filename, rules_path="rules.yaml"):
+        self.filename = filename
+        self.findings = []
+        self.scope_vars = {} # Simple constant propagation map
+        self.taint_map = {}  # Tracks variable origin
+        self.import_aliases = {} # Maps alias -> original module
+        self.rules = self._load_rules(rules_path)
+
+    def _load_rules(self, path):
+        if not os.path.exists(path):
+            return {"rules": []}
+        with open(path, 'r') as f:
+            return yaml.safe_load(f)
+
+    def calculate_entropy(self, data):
+        if not data: return 0
+        entropy = 0
+        for x in range(256):
+            p_x = float(data.count(chr(x))) / len(data)
+            if p_x > 0:
+                entropy += - p_x * math.log(p_x, 2)
+        return entropy
+
+    def add_finding(self, node, rule_id, message_val):
+        for rule in self.rules['rules']:
+            if rule['id'] == rule_id:
+                self.findings.append({
+                    'line': node.lineno,
+                    'severity': rule['severity'],
+                    'category': rule['category'],
+                    'message': rule['message'] % str(message_val),
+                    'code': getattr(node, 'lineno', 0)
+                })
+
+    def visit_Assign(self, node):
+        # Tracking constants and taints
+        resolved = StaticResolver.resolve(node.value, self.scope_vars)
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                if resolved is not None:
+                    self.scope_vars[target.id] = resolved
+                # Track if it's assigned from a dangerous attribute (taint)
+                if isinstance(node.value, ast.Attribute):
+                    full_name = self.get_full_attr_name(node.value)
+                    if full_name:
+                        self.taint_map[target.id] = full_name
+        self.generic_visit(node)
+
+    def get_full_attr_name(self, node):
+        if isinstance(node, ast.Name):
+            return self.import_aliases.get(node.id, node.id)
+        if isinstance(node, ast.Attribute):
+            base = self.get_full_attr_name(node.value)
+            if base:
+                return f"{base}.{node.attr}"
+        return None
 
     def visit_Import(self, node):
         for alias in node.names:
-            real_name = alias.name
-            target_name = alias.asname or real_name
-            self.import_aliases[target_name] = real_name
-            
-            if real_name in self.suspicious_imports:
-                self.add_finding(node, 'MEDIUM', 'Suspicious Import', f'Importing {real_name} (as {target_name})')
+            actual_name = alias.name
+            target_name = alias.asname or alias.name
+            self.import_aliases[target_name] = actual_name
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node):
         module = node.module
-        if module in self.suspicious_imports:
-            self.add_finding(node, 'MEDIUM', 'Suspicious Import', f'Importing from {module}')
-        
         for alias in node.names:
-            # handle 'from os import system as sys_call'
-            # technically this is more of a function alias, but for now we track module-level imports
-            pass
-        self.generic_visit(node)
-
-    def visit_Assign(self, node):
-        # Taint tracking: if we assign a dangerous call to a variable
-        # e.g., dangerous = os.system
-        if isinstance(node.value, ast.Attribute):
-            real_mod = ""
-            if isinstance(node.value.value, ast.Name):
-                real_mod = self.get_real_module(node.value.value.id)
-                if real_mod == 'os' and node.value.attr in ('system', 'popen', 'spawn'):
-                    for target in node.targets:
-                        if isinstance(target, ast.Name):
-                            self.tainted_vars[target.id] = f'os.{node.value.attr}'
-                            self.add_finding(node, 'HIGH', 'Taint Tracking', f'Variable {target.id} is assigned a dangerous function: os.{node.value.attr}')
-        
-        # Also track assignments from environ
-        if isinstance(node.value, ast.Attribute):
-             if isinstance(node.value.value, ast.Name) and self.get_real_module(node.value.value.id) == 'os' and node.value.attr == 'environ':
-                 for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        self.tainted_vars[target.id] = 'os.environ'
-
+            actual_name = f"{module}.{alias.name}"
+            target_name = alias.asname or alias.name
+            self.import_aliases[target_name] = actual_name
         self.generic_visit(node)
 
     def visit_Call(self, node):
-        # Detect eval/exec
-        func_name = ""
-        if isinstance(node.func, ast.Name):
-            func_name = node.func.id
-            if func_name in ('eval', 'exec'):
-                self.add_finding(node, 'CRITICAL', 'Dynamic Execution', f'Use of {func_name}() detected.')
-            
-            # Check if calling a tainted variable
-            if func_name in self.tainted_vars:
-                self.add_finding(node, 'CRITICAL', 'Tainted Call', f'Calling tainted variable {func_name} (source: {self.tainted_vars[func_name]})')
-
-        # Detect subprocess/os.system via attributes and aliases
-        if isinstance(node.func, ast.Attribute):
-            if isinstance(node.func.value, ast.Name):
-                module_alias = node.func.value.id
-                real_module = self.get_real_module(module_alias)
-                
-                if real_module == 'os' and node.func.attr in ('system', 'popen', 'spawn'):
-                    self.add_finding(node, 'CRITICAL', 'OS Command', f'{real_module}.{node.func.attr}() execution.')
-                if real_module == 'subprocess':
-                    self.add_finding(node, 'HIGH', 'Subprocess', f'subprocess.{node.func.attr}() call.')
+        # 1. Resolve Dynamic Imports: __import__('o'+'s'), importlib.import_module(...)
+        func_name = self.get_full_attr_name(node.func)
         
-        self.generic_visit(node)
+        # Dynamic import solver
+        if func_name in ('__import__', 'importlib.import_module', 'builtins.__import__'):
+            module_name = StaticResolver.resolve(node.args[0], self.scope_vars)
+            if module_name:
+                # We flag this as a dynamic import finding
+                self.add_finding(node, 'dynamic-execution', f"dynamic import of '{module_name}'")
+        
+        # 2. Match against YAML rules (Sinks)
+        resolved_func = func_name
+        if not resolved_func and isinstance(node.func, ast.Name) and node.func.id in self.taint_map:
+            resolved_func = self.taint_map[node.func.id]
+            
+        if resolved_func:
+            for rule in self.rules['rules']:
+                if resolved_func in rule['patterns']:
+                    self.add_finding(node, rule['id'], resolved_func)
 
-    def visit_Attribute(self, node):
-        # Detect access to environ
-        if isinstance(node.value, ast.Name):
-            real_module = self.get_real_module(node.value.id)
-            if real_module == 'os' and node.attr == 'environ':
-                self.add_finding(node, 'HIGH', 'Data Extraction', 'Accessing environment variables (os.environ).')
+        # 3. Handle getattr(os, 'sys' + 'tem')
+        if func_name == 'getattr' and len(node.args) >= 2:
+            obj = self.get_full_attr_name(node.args[0])
+            attr = StaticResolver.resolve(node.args[1], self.scope_vars)
+            if obj and attr:
+                full_call = f"{obj}.{attr}"
+                for rule in self.rules['rules']:
+                    if full_call in rule['patterns']:
+                        self.add_finding(node, rule['id'], full_call)
+
         self.generic_visit(node)
 
     def visit_Constant(self, node):
-        if isinstance(node.value, str):
-            self.check_string(node, node.value)
-        self.generic_visit(node)
+        if isinstance(node.value, str) and len(node.value) > 20:
+            entropy = self.calculate_entropy(node.value)
+            if entropy > 4.5: # Threshold for potential obfuscation
+                self.findings.append({
+                    'line': node.lineno,
+                    'severity': 'MEDIUM',
+                    'category': 'Obfuscation',
+                    'message': f"High entropy string literal ({entropy:.2f}) - potential payload.",
+                    'code': node.lineno
+                })
 
-    def visit_Str(self, node):
-        self.check_string(node, node.s)
-        self.generic_visit(node)
-
-    def check_string(self, node, value):
-        # Shannon Entropy calculation
-        if len(value) > 20:
-            entropy = calculate_entropy(value)
-            if entropy > 4.5: # Threshold for potential encryption/obfuscation
-                self.add_finding(node, 'MEDIUM', 'High Entropy', f'High entropy string detected ({entropy:.2f}). Possible obfuscation.')
-
-        # Check for sensitive file paths
-        paths = ['/etc/passwd', '.ssh/', '.kube/config', '/proc/self/environ']
-        for path in paths:
-            if path in value:
-                self.add_finding(node, 'HIGH', 'Sensitive Path', f'Reference to sensitive path: {path}')
-        
-        # Check for long base64-like strings
-        if len(value) > 60 and re.match(r'^[A-Za-z0-9+/=]+$', value):
-            # Check if it actually decodes to something suspicious? For now, flag it.
-            self.add_finding(node, 'MEDIUM', 'Potential Obfuscation', 'Large base64-like string detected.')
-
-def analyze_file(filepath):
+def analyze_file(filepath, rules_path="rules.yaml"):
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, 'r') as f:
             content = f.read()
-        tree = ast.parse(content)
-        analyzer = SilentSentryAnalyzer(filepath, content)
+            tree = ast.parse(content)
+        
+        analyzer = SilentSentryCore(filepath, rules_path)
         analyzer.visit(tree)
+        
+        # Add code snippets
+        lines = content.splitlines()
+        for f in analyzer.findings:
+            idx = f['line'] - 1
+            if 0 <= idx < len(lines):
+                f['snippet'] = lines[idx].strip()
+            else:
+                f['snippet'] = "N/A"
+        
         return analyzer.findings
     except Exception as e:
-        return [{'file': filepath, 'line': 0, 'severity': 'LOW', 'category': 'Error', 'message': str(e), 'snippet': ''}]
+        raise Exception(f"Failed to analyze {filepath}: {e}")

@@ -1,0 +1,37 @@
+rules:
+  - id: dynamic-execution
+    category: Dynamic Execution
+    severity: CRITICAL
+    message: "Potential dynamic code execution via %s detected."
+    patterns:
+      - "eval"
+      - "exec"
+  - id: os-command
+    category: System Command
+    severity: CRITICAL
+    message: "Execution of system command via %s."
+    patterns:
+      - "os.system"
+      - "os.popen"
+      - "subprocess.run"
+      - "subprocess.Popen"
+      - "subprocess.call"
+      - "pty.spawn"
+  - id: network-socket
+    category: Network Connection
+    severity: HIGH
+    message: "Outbound network connection attempt via %s."
+    patterns:
+      - "socket.socket"
+      - "socket.create_connection"
+      - "requests.get"
+      - "requests.post"
+      - "urllib.request.urlopen"
+  - id: data-exfiltration
+    category: Data Exfiltration
+    severity: HIGH
+    message: "Accessing sensitive system data: %s."
+    patterns:
+      - "os.environ"
+      - "os.getenv"
+      - "open"
