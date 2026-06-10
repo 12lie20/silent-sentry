@@ -4,12 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "silent-sentry"
-version = "0.1.0"
-description = "Static AST-based Security Auditor for Python"
+version = "0.2.0"
+description = "Advanced Enterprise-Grade Static AST-based Security Auditor"
 readme = "README.md"
 requires-python = ">=3.7"
 authors = [
     { name = "12lie20" }
+]
+dependencies = [
+    "rich",
+    "requests"
 ]
 classifiers = [
     "Programming Language :: Python :: 3",

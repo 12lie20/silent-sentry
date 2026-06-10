@@ -1,8 +1,8 @@
 # 🛡️ Silent Sentry
 
-> **Premium Static AST-based Security Auditor targeting PyPI package backdoors.**
+> **Enterprise-Grade Static AST-based Security Auditor for Python.**
 
-Silent Sentry is a high-performance security tool designed to inspect Python source code for malicious patterns, obfuscation, and suspicious exfiltration techniques without executing the code.
+Silent Sentry is a premium security tool designed to inspect Python source code for malicious patterns, obfuscation, and suspicious exfiltration techniques. It performs deep static analysis of the Abstract Syntax Tree (AST) to identify threats without code execution.
 
 ```ascii
    _____ _ _            _     _____             _              
@@ -15,13 +15,18 @@ Silent Sentry is a high-performance security tool designed to inspect Python sou
                                                         |___/ 
 ```
 
-## ✨ Features
+## ✨ Advanced Features
 
-- 🔍 **Dynamic Code Detection**: Flags `eval()` and `exec()`.
-- 🔐 **Obfuscation Detection**: Identifies base64, codecs, and suspicious hex strings.
-- 🌐 **Networking Heuristics**: Monitors `socket`, `requests`, and `aiohttp` usage.
-- 🐚 **Shell Command Auditing**: Detects `subprocess`, `os.system`, and `pty`.
-- 📦 **Exfiltration Prevention**: Scans for access to `os.environ` and sensitive system paths like `.ssh/` or `.kube/`.
+- 🧠 **Import Alias Tracking**: Detects attempts to hide dangerous modules behind aliases (e.g., `import os as dangerous`).
+- 🌊 **Variable Taint Analysis**: Tracks data flow from dangerous sources to potentially malicious sinks.
+- 📉 **Shannon Entropy Analysis**: Calculates entropy on string literals to detect encrypted or highly obfuscated payloads.
+- 📦 **PyPI Integration**: Audit any package directly from PyPI by downloading and extracting it automatically.
+- 🎨 **Rich UI**: Beautiful terminal interface with colored tables, progress indicators, and summarized reports.
+- 🔍 **Deep Inspection**:
+    - **Dynamic Execution**: `eval()`, `exec()`
+    - **Shell Commands**: `os.system`, `subprocess`, `pty`
+    - **Data Exfiltration**: `os.environ` access, sensitive paths (`/etc/passwd`, `.ssh/`)
+    - **Obfuscation**: Base64 detection, hex patterns.
 
 ## 🚀 Installation
 
@@ -31,15 +36,26 @@ pip install .
 
 ## 🛠️ Usage
 
-Scan a single file:
+### Scan Local Path
+Scan a single file or an entire directory:
 ```bash
-silent-sentry malicious_package.py
+silent-sentry scan ./my_project
 ```
 
-Scan an entire project directory:
+### Audit PyPI Package
+Directly audit the latest version of any package on PyPI:
 ```bash
-silent-sentry ./my_project
+silent-sentry pypi requests
 ```
+
+## 📊 Vulnerability Categorization
+
+| Severity | Category | Description |
+| :--- | :--- | :--- |
+| **CRITICAL** | Dynamic Execution | Potential for arbitrary code execution via `eval`/`exec`. |
+| **HIGH** | OS Command / Taint | Unauthorized shell access or use of tainted variables. |
+| **MEDIUM** | High Entropy / Obfuscation | Detection of suspicious, non-readable data structures. |
+| **LOW** | Suspicious Imports | Presence of networking or system modules in unusual contexts. |
 
 ## 📄 License
 
